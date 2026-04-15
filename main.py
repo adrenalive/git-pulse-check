@@ -1,45 +1,27 @@
-import subprocess
-import sys
-import argparse
+import subprocess, argparse, collections, sys
 from datetime import datetime, timedelta
 
-def get_git_commits(since_days):
-    since_date = (datetime.now() - timedelta(days=since_days)).strftime('%Y-%m-%d %H:%M:%S')
-    cmd = ['git', 'log', f'--since="{since_date}"', '--pretty=format:%h|%an|%s', '--no-merges']
-    try:
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, shell=False).decode('utf-8')
-        return output.splitlines() if output else []
-    except subprocess.CalledProcessError:
-        return None
+def run_git(cmd):
+    try: return subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8').splitlines()
+    except (subprocess.CalledProcessError, FileNotFoundError): return None
 
-def format_report(commits):
-    if commits is None:
-        return "Error: Not a git repository or git not found."
-    if not commits:
-        return "No activity found in the specified timeframe."
+def generate_pulse(days=1):
+    since = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    raw = run_git(['git', 'log', f'--since={since}', '--pretty=format:%h|%an|%s', '--no-merges'])
     
-    report = [f"--- Git Pulse Report ({len(commits)} Commits) ---"]
-    authors = {}
-    
-    for line in commits:
-        sha, author, msg = line.split('|', 2)
-        if author not in authors:
-            authors[author] = []
-        authors[author].append(f"  - [{sha}] {msg}")
-    
-    for author, msgs in authors.items():
-        report.append(f"\nUser: {author}")
-        report.extend(msgs)
-    
+    if raw is None: return "Error: Git environment failure."
+    if not raw: return "No activity found."
+
+    authors = collections.defaultdict(list)
+    for s, a, m in (line.split('|', 2) for line in raw):
+        authors[a].append(f"  - [{s}] {m}")
+
+    report = [f"--- Git Pulse: {len(raw)} Commits ---"]
+    for user, lines in authors.items():
+        report.extend([f"\nUser: {user}", *lines])
     return "\n".join(report)
 
-def main():
-    parser = argparse.ArgumentParser(description='Summarize recent git activity.')
-    parser.add_argument('--days', type=int, default=1, help='Number of days to look back (default: 1)')
-    args = parser.parse_args()
-    
-    result = get_git_commits(args.days)
-    print(format_report(result))
-
 if __name__ == '__main__':
-    main()
+    p = argparse.ArgumentParser(description='Git activity summary')
+    p.add_argument('--days', type=int, default=1)
+    print(generate_pulse(p.parse_args().days))
